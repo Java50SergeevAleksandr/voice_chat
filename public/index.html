@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Voice Chat</title>
+</head>
+<body>
+    <h1>WebRTC Voice Chat</h1>
+    <button id="startCall">Start Call</button>
+    <button id="endCall">End Call</button>
+
+    <script>
+        const startButton = document.getElementById('startCall');
+        const endButton = document.getElementById('endCall');
+
+        let localStream;
+        let pc; // RTCPeerConnection
+        const socket = new WebSocket('ws://localhost:3000'); // Подключаемся к WebSocket серверу
+
+        // Google STUN сервер для WebRTC
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' }
+            ]
+        };
+
+        // Инициализация RTCPeerConnection
+        function createPeerConnection() {
+            pc = new RTCPeerConnection(configuration);
+
+            // Добавляем локальный аудио стрим в PeerConnection
+            localStream.getTracks().forEach(track => {
+                pc.addTrack(track, localStream);
+            });
+
+            // Когда получаем новый ICE-кандидат, отправляем его через WebSocket
+            pc.onicecandidate = event => {
+                if (event.candidate) {
+                    socket.send(JSON.stringify({
+                        type: 'ice-candidate',
+                        candidate: event.candidate
+                    }));
+                }
+            };
+
+            // Когда получаем медиа-поток от удаленного пользователя
+            pc.ontrack = event => {
+                const remoteAudio = new Audio();
+                remoteAudio.srcObject = event.streams[0];
+                remoteAudio.play();
+            };
+        }
+
+        // Обработка сигналов, полученных через WebSocket
+        socket.onmessage = event => {
+            const data = JSON.parse(event.data);
+
+            if (data.type === 'offer') {
+                // Когда получаем offer, создаем ответ (answer)
+                createPeerConnection();
+                pc.setRemoteDescription(new RTCSessionDescription(data.offer))
+                    .then(() => pc.createAnswer())
+                    .then(answer => pc.setLocalDescription(answer))
+                    .then(() => {
+                        socket.send(JSON.stringify({
+                            type: 'answer',
+                            answer: pc.localDescription
+                        }));
+                    });
+            } else if (data.type === 'answer') {
+                // Когда получаем answer, устанавливаем его как удаленное описание
+                pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            } else if (data.type === 'ice-candidate') {
+                // Добавляем полученный ICE-кандидат
+                pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        };
+
+        // Запуск звонка
+        startButton.onclick = () => {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    localStream = stream;
+                    createPeerConnection();
+
+                    // Создаем и отправляем offer
+                    pc.createOffer()
+                        .then(offer => pc.setLocalDescription(offer))
+                        .then(() => {
+                            socket.send(JSON.stringify({
+                                type: 'offer',
+                                offer: pc.localDescription
+                            }));
+                        });
+                })
+                .catch(error => {
+                    console.error('Error accessing media devices.', error);
+                });
+        };
+
+        // Завершение звонка
+        endButton.onclick = () => {
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+        };
+    </script>
+</body>
+</html>
