@@ -79,6 +79,7 @@
 
         // Запуск звонка
         startButton.onclick = () => {
+            startButton.disabled = true;
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
                     localStream = stream;
@@ -96,14 +97,19 @@
                 })
                 .catch(error => {
                     console.error('Error accessing media devices.', error);
+                    startButton.disabled = false;
                 });
+
         };
 
         // Завершение звонка
         endButton.onclick = () => {
             if (pc) {
+                console.log('Ending call');
                 pc.close();
                 pc = null;
+                endButton.disabled = true;
+                startButton.disabled = false;
             }
         };
     </script>
